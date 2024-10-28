@@ -1,0 +1,439 @@
+library(rgee)
+library(mapedit)
+library(sf) 
+
+
+ee$Authenticate(auth_mode='notebook')
+ee$Initialize(project='ee-jonathan-bussoleni-edunat')
+ee$String('Hello from the Earth Engine servers!')$getInfo()
+ee$Initialize()
+
+# Apri una mappa interattiva per disegnare la geometria
+drawn_geometry <- mapedit::editMap()
+print(drawn_geometry)
+#xmin: -56.2642 ymin: -10.35324 xmax: -54.84275 ymax: -9.545054
+# Usa il poligono disegnato (già confermato)
+aoi_sf <- st_as_sf(drawn_geometry)
+# Converte la geometria sf in una geometria di Earth Engine
+aoi_ee <- sf_as_ee(aoi_sf)
+#assegna Matogrosso alla geometria EE
+Matogrosso <- aoi_ee
+
+#CLOUDNESS L5
+applyScaleAndMask <- function(image) {
+  # Seleziona la banda QA_PIXEL
+  qa <- image$select('QA_PIXEL')
+  
+  # Crea una maschera basata sui bit: 3 (nuvole), 4 (nuvole alte) e 5-6 (ombra di nuvola)
+  cloud_mask <- qa$bitwiseAnd(8)$eq(0)    # Bit 3: nuvole
+  cirrus_mask <- qa$bitwiseAnd(16)$eq(0)  # Bit 4: nuvole alte (cirri)
+  shadow_mask <- qa$bitwiseAnd(32)$eq(0)  # Bit 5-6: ombra di nuvola
+  
+  # Combina tutte le maschere
+  combined_mask <- cloud_mask$And(cirrus_mask)$And(shadow_mask)
+  
+  # Applica la maschera combinata
+  image <- image$updateMask(combined_mask)
+  
+  # Applica i fattori di scala
+  opticalBands <- image$select('SR_B.')$multiply(0.0000275)$add(-0.2)
+  thermalBand <- image$select('ST_B6')$multiply(0.00341802)$add(149.0)
+  
+  # Aggiungi le bande scalate all'immagine
+  image <- image$addBands(opticalBands, NULL, TRUE)$addBands(thermalBand, NULL, TRUE)
+  
+  return(image)
+}
+
+
+#CLOUDNESS L8
+applyScaleAndMaskL8 <- function(image) {
+  # Maschera basata sulla banda QA_PIXEL (bit 3 per le nuvole)
+  qa <- image$select('QA_PIXEL')
+  
+  # Crea una maschera per escludere pixel con nuvole
+  cloud_mask <- qa$bitwiseAnd(8)$eq(0)  # Bit 3: nuvole
+  
+  # Applica la maschera
+  image <- image$updateMask(cloud_mask)
+  
+  # Applica i fattori di scala
+  opticalBands <- image$select('SR_B[1-7]')$multiply(0.0000275)$add(-0.2)  # Bande ottiche SR_B1 - SR_B7
+  thermalBand <- image$select('ST_B10')$multiply(0.00341802)$add(149.0)  # Banda termica ST_B10
+  
+  # Restituisce l'immagine scalata e mascherata
+  image <- image$addBands(opticalBands, NULL, TRUE)$addBands(thermalBand, NULL, TRUE)
+  
+  return(image)
+}
+
+# Visualizzazione L5
+visualizationL5 <- list(
+  bands = c('SR_B3', 'SR_B2', 'SR_B1'),
+  min = 0.0,
+  max = 0.3
+)
+
+# Visualizzazione L5_SWIR
+visualizationL5_SWIR <- list(
+  bands = c('SR_B5', 'SR_B1'),
+  min = 0.0,
+  max = 0.3
+)
+
+Map$addLayer(clipped_dataset1986$median(), visualizationL5_SWIR, 'SWIR 1986')
+
+# Visualizzazione L8
+visualizationL8 <- list(
+  bands = c('SR_B4', 'SR_B3', 'SR_B2'),
+  min = 0.0,
+  max = 0.3
+)
+
+
+# Visualizzazione L8_SWIR
+visualizationL8_SWIR <- list(
+  bands = c('SR_B6', 'SR_B2'),
+  min = 0.0,
+  max = 0.3
+)
+
+
+# L5 1986
+dataset1986 <- ee$ImageCollection('LANDSAT/LT05/C02/T1_L2')$
+  filterDate('1986-01-01', '1986-12-31')$
+  map(applyScaleAndMask)
+
+
+# L5 1995
+dataset1995 <- ee$ImageCollection('LANDSAT/LT05/C02/T1_L2')$
+  filterDate('1995-01-01', '1995-12-31')$
+  map(applyScaleAndMask)
+
+# L5 2000
+dataset2000 <- ee$ImageCollection('LANDSAT/LT05/C02/T1_L2')$
+  filterDate('2000-01-01', '2000-12-31')$
+  map(applyScaleAndMask)
+
+# L5 2005
+dataset2005 <- ee$ImageCollection('LANDSAT/LT05/C02/T1_L2')$
+  filterDate('2005-01-01', '2005-12-31')$
+  map(applyScaleAndMask)
+
+# L5 2010
+dataset2010 <- ee$ImageCollection('LANDSAT/LT05/C02/T1_L2')$
+  filterDate('2010-01-01', '2010-12-31')$
+  map(applyScaleAndMask)
+
+# L8 2015
+dataset2015 <- ee$ImageCollection('LANDSAT/LC08/C02/T1_L2')$
+  filterDate('2015-01-01', '2015-12-31')$
+  map(applyScaleAndMaskL8)
+
+# L8 2020
+dataset2020 <- ee$ImageCollection('LANDSAT/LC08/C02/T1_L2')$
+  filterDate('2020-01-01', '2020-12-31')$
+  map(applyScaleAndMaskL8)
+
+# L8 2024
+dataset2024 <- ee$ImageCollection('LANDSAT/LC08/C02/T1_L2')$
+  filterDate('2024-01-01', '2024-09-26')$
+  map(applyScaleAndMaskL8)
+
+
+
+#L5
+# clip 1986
+clipped_dataset1986 <- dataset1986$map(function(image) {
+  image$clip(Matogrosso)
+})
+# clip 1995
+clipped_dataset1995 <- dataset1995$map(function(image) {
+  image$clip(Matogrosso)
+})
+# clip 2000
+clipped_dataset2000 <- dataset2000$map(function(image) {
+  image$clip(Matogrosso)
+})
+# clip 2005
+clipped_dataset2005 <- dataset2005$map(function(image) {
+  image$clip(Matogrosso)
+})
+# clip 2010
+clipped_dataset2010 <- dataset2010$map(function(image) {
+  image$clip(Matogrosso)
+})
+
+#L8
+# clip 2015
+clipped_dataset2015 <- dataset2015$map(function(image) {
+  image$clip(Matogrosso)
+})
+# clip 2020
+clipped_dataset2020 <- dataset2020$map(function(image) {
+  image$clip(Matogrosso)
+})
+# clip 2024
+clipped_dataset2024 <- dataset2024$map(function(image) {
+  image$clip(Matogrosso)
+})
+
+
+
+#Timeseries
+Map$centerObject(Matogrosso, 8)
+
+Map$addLayer(clipped_dataset1986$median()$multiply(1.5), visualizationL5, '1986')+
+Map$addLayer(clipped_dataset2024$median(), visualizationL8, '2024')
+
+
+#L5
+Map$addLayer(clipped_dataset1986$median()$multiply(1.5), visualizationL5, '1986')+
+Map$addLayer(clipped_dataset1995$median(), visualizationL5, '1995')+
+Map$addLayer(clipped_dataset2000$median(), visualizationL5, '2000')+
+Map$addLayer(clipped_dataset2005$median(), visualizationL5, '2005')+
+Map$addLayer(clipped_dataset2010$median(), visualizationL5, '2010')+
+#L8
+Map$addLayer(clipped_dataset2015$median(), visualizationL8, '2015')+
+Map$addLayer(clipped_dataset2020$median(), visualizationL8, '2020')+
+Map$addLayer(clipped_dataset2024$median(), visualizationL8, '2024')
+
+
+
+
+
+# Funzione per calcolare l'NDVI per Landsat 5
+calculateNDVI_L5 <- function(image) {
+  ndvi <- image$normalizedDifference(c('SR_B4', 'SR_B3'))$rename('NDVI')  # Landsat 5 (NIR: B4, Red: B3)
+  return(image$addBands(ndvi))
+}
+
+# Funzione per calcolare l'NDVI per Landsat 8
+calculateNDVI_L8 <- function(image) {
+  ndvi <- image$normalizedDifference(c('SR_B5', 'SR_B4'))$rename('NDVI')  # Landsat 8 (NIR: B5, Red: B4)
+  return(image$addBands(ndvi))
+}
+
+
+# Funzione per ottenere i parametri di visualizzazione per l'NDVI
+visualizationNDVI <- function() {
+  list(min = -1, max = 1, palette = viridis::viridis(100))  # Parametri di visualizzazione
+}
+
+#L5 NDVI
+ndvi_1986 <- clipped_dataset1986$map(calculateNDVI_L5)
+ndvi_1995 <- clipped_dataset1995$map(calculateNDVI_L5)
+ndvi_2000 <- clipped_dataset2000$map(calculateNDVI_L5)
+ndvi_2005 <- clipped_dataset2005$map(calculateNDVI_L5)
+ndvi_2010 <- clipped_dataset2010$map(calculateNDVI_L5)
+#L8 NDVI
+ndvi_2015 <- clipped_dataset2015$map(calculateNDVI_L8)
+ndvi_2020 <- clipped_dataset2020$map(calculateNDVI_L8)
+ndvi_2024 <- clipped_dataset2024$map(calculateNDVI_L8)
+
+
+# Centra la mappa sull'area di interesse
+Map$centerObject(Matogrosso, 8)
+
+#L5
+Map$addLayer(ndvi_1986$median()$select('NDVI'), visualizationNDVI(), 'NDVI 1986')+
+  Map$addLayer(ndvi_1995$median()$select('NDVI'), visualizationNDVI(), 'NDVI 1995')+
+  Map$addLayer(ndvi_2000$median()$select('NDVI'), visualizationNDVI(), 'NDVI 2000')+
+  Map$addLayer(ndvi_2005$median()$select('NDVI'), visualizationNDVI(), 'NDVI 2005')+
+  Map$addLayer(ndvi_2010$median()$select('NDVI'), visualizationNDVI(), 'NDVI 2010')+
+  #L8
+  Map$addLayer(ndvi_2015$median()$select('NDVI'), visualizationNDVI(), 'NDVI 2015')+
+  Map$addLayer(ndvi_2020$median()$select('NDVI'), visualizationNDVI(), 'NDVI 2020')+
+  Map$addLayer(ndvi_2024$median()$select('NDVI'), visualizationNDVI(), 'NDVI 2024')
+
+
+
+
+
+ndvi_difference <- ndvi_2024$median()$select('NDVI')$subtract(ndvi_1986$median()$select('NDVI'))
+
+# Visualizza la differenza NDVI con una palette personalizzata (rosso per diminuzione, verde per aumento)
+Map$centerObject(Matogrosso, 8)
+Map$addLayer(ndvi_difference, list(min = -1, max = 1, palette = c("red", "white", "green")), "Differenza NDVI 1985-2024")
+
+
+
+# Maschera per la perdita di vegetazione: dove l'NDVI nel 2024 è inferiore rispetto al 1985
+vegetation_loss_mask <- ndvi_2024$median()$select('NDVI')$lt(ndvi_1986$median()$select('NDVI'))
+
+# Conta i pixel di vegetazione persa
+vegetation_loss_pixels <- vegetation_loss_mask$reduceRegion(
+  reducer = ee$Reducer$sum(),
+  geometry = Matogrosso,
+  scale = 30,
+  maxPixels = 1e13
+)$get('NDVI')$getInfo()
+
+# Risoluzione spaziale Landsat: 30 metri (ogni pixel è 30x30 metri)
+pixel_area_km2 <- (30 * 30) / 1e6  # conversione da m² a km²
+
+# Conversione dei pixel persi in km²
+vegetation_loss_km2 <- vegetation_loss_pixels * pixel_area_km2
+#print(paste("Vegetazione persa in km²:", vegetation_loss_km2))
+
+# Calcolo della vegetazione totale nel 1985 (basato sui pixel con NDVI > 0.2)
+vegetation_1986_mask <- ndvi_1986$median()$select('NDVI')$gt(0.2)
+vegetation_1986_pixels <- vegetation_1986_mask$reduceRegion(
+  reducer = ee$Reducer$sum(),
+  geometry = Matogrosso,
+  scale = 30,
+  maxPixels = 1e13
+)$get('NDVI')$getInfo()
+
+# Calcolo della superficie totale di vegetazione nel 1985 in km²
+vegetation_1986_km2 <- vegetation_1986_pixels * pixel_area_km2
+#print(paste("Vegetazione totale nel 1986 in km²:", vegetation_1985_km2))
+
+# Calcolo della percentuale di vegetazione persa
+vegetation_loss_percentage <- (vegetation_loss_km2 / vegetation_1986_km2) * 100
+#print(paste("Percentuale di vegetazione persa:", vegetation_loss_percentage))
+
+# Riassunto dei dati estratti
+summary_message <- paste(
+  "----- Riassunto dei Dati Estratti -----\n",
+  "Vegetazione totale nel 1986: ", round(vegetation_1986_km2, 2), " km²\n",
+  "Vegetazione persa nel 2024 rispetto al 1986: ", round(vegetation_loss_km2, 2), " km²\n",
+  "Percentuale di vegetazione persa: ", round(vegetation_loss_percentage, 2), "%\n",
+  sep = ""
+)
+cat(summary_message)
+
+
+
+
+# Seleziona solo le bande NIR e Rosso
+input1986 <- clipped_dataset1986$select(c('SR_B5', 'SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B7'))$mean()  # NIR è SR_B4 e Rosso è SR_B3
+
+# Definisci la regione per il campionamento
+region <- Matogrosso
+
+
+# Crea il dataset di addestramento
+training1986 <- input1986$sample(
+  region = region,
+  scale = 30,
+  numPixels = 1000
+)
+
+# Istanzia il clusterer e addestralo
+clusterer1986 <- ee$Clusterer$wekaKMeans(2)$train(training1986)
+
+# Esegui il clustering sull'immagine
+result1986 <- input1986$cluster(clusterer1986)
+
+# Seleziona solo le bande NIR e Rosso
+input2024 <- clipped_dataset2024$select(c('SR_B6', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7'))$mean()  # NIR è SR_B4 e Rosso è SR_B3
+
+# Definisci la regione per il campionamento
+region <- Matogrosso
+
+
+# Crea il dataset di addestramento
+training2024 <- input2024$sample(
+  region = region,
+  scale = 30,
+  numPixels = 1000
+)
+
+# Istanzia il clusterer e addestralo
+clusterer2024 <- ee$Clusterer$wekaKMeans(2)$train(training2024)
+
+# Esegui il clustering sull'immagine
+result2024 <- input2024$cluster(clusterer2024)
+
+# Visualizza i cluster con colori casuali
+Map$centerObject(region)
+
+
+
+# Definisci una palette di colori per i cluster
+palette <- c('white', 'green')  # Scegli i colori desiderati per ciascun cluster
+palette2 <- c('green', 'white')  # Scegli i colori desiderati per ciascun cluster
+
+# Aggiungi i cluster alla mappa con la palette definita
+Map$addLayer(eeObject = result1986$visualize(min = 0, max = 1, palette = palette), name = "KMEAN 1986")+
+  Map$addLayer(ndvi_1986$median()$select('NDVI'), visualizationNDVI(), 'NDVI 1986')+
+  Map$addLayer(clipped_dataset1986$median()$multiply(1.5), visualizationL5, 'RGB 1986')+
+  Map$addLayer(clipped_dataset1986$median(), visualizationL5_SWIR, 'SWIR 1986')+
+
+  
+  Map$addLayer(eeObject = result2024$visualize(min = 0, max = 1, palette = palette2), name = "KMEAN 2024")+  
+  Map$addLayer(ndvi_2024$median()$select('NDVI'), visualizationNDVI(), 'NDVI 2024')+
+  Map$addLayer(clipped_dataset2024$median(), visualizationL8, 'RGB 2024')+
+  Map$addLayer(clipped_dataset2024$median(), visualizationL8_SWIR, 'SWIR 2024')
+
+
+# Funzione per calcolare la percentuale di vegetazione
+calcola_perdita_vegetazione <- function(cluster_result, region) {
+  # Conta i pixel per ciascun cluster nella regione definita
+  pixel_counts <- cluster_result$reduceRegion(
+    reducer = ee$Reducer$frequencyHistogram(),
+    geometry = region,
+    scale = 30,
+    maxPixels = 1e8
+  )$getInfo()
+  
+  # Estrai i conteggi dei cluster
+  cluster_counts <- pixel_counts[['cluster']]
+  
+  # Ottieni il numero di pixel per il cluster vegetazione (assumiamo sia il cluster 1)
+  vegetazione_pixel <- cluster_counts[['1']]
+  totale_pixel <- sum(unlist(cluster_counts))
+  
+  # Calcola la percentuale di vegetazione
+  percentuale_vegetazione <- (vegetazione_pixel / totale_pixel) * 100
+  return(percentuale_vegetazione)
+}
+
+# Calcola la percentuale di vegetazione per il 1986 e il 2024
+percentuale_vegetazione_1986 <- calcola_perdita_vegetazione(result1986, region)
+percentuale_vegetazione_2024 <- calcola_perdita_vegetazione(result2024, region)
+
+# Calcola la perdita di vegetazione in percentuale
+perdita_vegetazione <- percentuale_vegetazione_1986 - percentuale_vegetazione_2024
+
+# Stampa i risultati
+cat("Percentuale di vegetazione nel 1986:", percentuale_vegetazione_1986, "%\n")
+cat("Percentuale di vegetazione nel 2024:", percentuale_vegetazione_2024, "%\n")
+cat("Perdita di vegetazione:", perdita_vegetazione, "%\n")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Definisci l'immagine che vuoi scaricare
+image_to_export <- clipped_dataset2024$median()$select(c('SR_B6', 'SR_B2'))  # Bande SWIR di interesse
+
+# Esporta l'immagine su Google Drive
+task <- ee_image_to_drive(
+  image = image_to_export,
+  description = 'SWIR_2024_export',
+  folder = 'EarthEngine_Exports',  # Specifica la cartella su Google Drive
+  fileNamePrefix = 'SWIR_2024',  # Prefisso per il nome del file
+  region = Matogrosso$geometry(),  # Definisci l'area di interesse
+  scale = 30,  # Imposta la risoluzione in metri (30m per Landsat)
+  maxPixels = 1e13
+)
+
+# Avvia l'operazione di esportazione
+task$start()
+
+
